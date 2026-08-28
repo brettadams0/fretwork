@@ -100,4 +100,25 @@ any active game; release on unmount, re-acquire on visibilitychange.
 
 ## Tuned constants
 Record any value discovered by testing on the real device here, with the reason.
-- (empty)
+
+Nothing has run on the S20 FE yet. The values below were measured in Chromium
+on the build machine, driving the app through a fake audio device playing
+synthesised open strings; they are the numbers the device has to agree with,
+not device numbers. Confirm each from the §10.3 debug overlay and correct it
+here.
+
+- `DETECT_EVERY_HOPS = 1` (src/audio/engine.ts) — YIN on every frame, as §2's
+  pipeline specifies. YIN costs 1.0–1.5 ms per 2048-sample frame; at 93.75
+  frames/s that is 100–140 ms of work per second of audio, a tenth to a seventh
+  of one core. Measured in-browser: 93.8 hops/s in, 93.8 detections/s out, no
+  drops. If the phone cannot hold that rate the overlay's detections/s will sit
+  below 93.75, and this becomes 2 with no other change.
+- Low E accuracy floor: YIN integrates its difference function over
+  buf.length / 2 = 1024 samples, only 1.76 periods of an 82 Hz E. Clean signal
+  error 0.62 cents; at 20 dB SNR the error is a systematic 6.3 cents sharp
+  (13.2 worst) that the stability filter cannot average away. Every other string
+  is inside 5 cents. Asserted as a per-string budget in tests/yin.test.ts. A
+  Phase 2 candidate — integrating each tau over all N - tau available samples
+  measures 0.10 cents clean and 5.2 at 20 dB, for 1.66x the cost.
+- Noise floor = median of the quietest frame in each of the last five seconds.
+  A percentile of recent levels measures the ringing note, not the room.
