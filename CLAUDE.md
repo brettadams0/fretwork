@@ -101,18 +101,53 @@ any active game; release on unmount, re-acquire on visibilitychange.
 ## Tuned constants
 Record any value discovered by testing on the real device here, with the reason.
 
-Nothing has run on the S20 FE yet. The values below were measured in Chromium
-on the build machine, driving the app through a fake audio device playing
-synthesised open strings; they are the numbers the device has to agree with,
-not device numbers. Confirm each from the §10.3 debug overlay and correct it
-here.
+### Confirmed on the S20 FE, Chrome (2026-08-28, §10.3 overlay)
+
+- **Android honours the §3.1 constraints.** echoCancellation, noiseSuppression
+  and autoGainControl all reported off by getSettings(); sampleRate 48000 as
+  asked, channelCount 1, base latency 4.0 ms. This was the largest unknown in
+  the spec. It does not generalise to other Android devices, so the check and
+  the banner stay.
+- **Capture keeps up.** 93.6 hops/s against an expected 93.75, no drops. The
+  AudioWorklet path is sound on this phone.
+- Screen wake lock: held.
+- Idle room level: RMS 0.00005, -85 dBFS — far under the 0.008 gate, so the
+  gate correctly stays closed on silence.
+
+### Open — needs a reading taken while a string is ringing
+
+1. **Does a played string clear `RMS_GATE = 0.008` on this mic?** Untested. If
+   it does not, the gate is the first genuinely device-tuned constant and the
+   tuner cannot work until it changes. Nothing else on this list matters until
+   this one is answered.
+2. **YIN's real cost on the device, and therefore `DETECT_EVERY_HOPS`.** Still
+   unknown — see the defect below.
+3. **Does the low E read E2 and not E3** through a real phone mic, with its
+   rolloff below 100 Hz? The synthesised and fake-device fixtures both say yes;
+   neither has a phone mic in the path.
+
+### Known defect, deferred (Phase 1)
+
+- The overlay's **detections/s counts analysis ticks, not YIN runs.**
+  `engine.ts` increments `#detectsInWindow` before the RMS gate is tested, so
+  with the gate closed it reports a full 93.6/s while `yin cost` correctly reads
+  0.00 ms. The row therefore proves nothing about CPU headroom when the room is
+  quiet — it only means something while the gate is open. Fix: increment only on
+  frames where YIN actually ran. One line; deferred deliberately, not forgotten.
+
+### Bench values, still unconfirmed on the device
+
+Measured in Chromium on the build machine, driving the app through a fake audio
+device playing synthesised open strings. These are the numbers the phone has to
+agree with, not phone numbers.
 
 - `DETECT_EVERY_HOPS = 1` (src/audio/engine.ts) — YIN on every frame, as §2's
   pipeline specifies. YIN costs 1.0–1.5 ms per 2048-sample frame; at 93.75
   frames/s that is 100–140 ms of work per second of audio, a tenth to a seventh
   of one core. Measured in-browser: 93.8 hops/s in, 93.8 detections/s out, no
-  drops. If the phone cannot hold that rate the overlay's detections/s will sit
-  below 93.75, and this becomes 2 with no other change.
+  drops — the gate was open throughout, so that detections figure was real. If
+  the phone cannot hold the rate this becomes 2 with no other change, but the
+  counter defect above has to be fixed before the overlay can tell us.
 - Low E accuracy floor: YIN integrates its difference function over
   buf.length / 2 = 1024 samples, only 1.76 periods of an 82 Hz E. Clean signal
   error 0.62 cents; at 20 dB SNR the error is a systematic 6.3 cents sharp
