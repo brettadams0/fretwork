@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AudioEngine, MicError } from './audio/engine';
 import { Tuner } from './games/Tuner';
+import { ChordCheck } from './games/ChordCheck';
 import { VersionTag } from './ui';
 
 /**
@@ -13,8 +14,12 @@ type State =
   | { name: 'running'; engine: AudioEngine }
   | { name: 'error'; message: string; retryable: boolean };
 
+type Mode = 'tuner' | 'chords';
+
 export default function App() {
   const [state, setState] = useState<State>({ name: 'idle' });
+  // One engine, two screens. Switching is a swap, not a page transition (§9).
+  const [mode, setMode] = useState<Mode>('tuner');
 
   const start = useCallback(async () => {
     setState({ name: 'starting' });
@@ -48,14 +53,18 @@ export default function App() {
   }, [state]);
 
   if (state.name === 'running') {
-    return <Tuner engine={state.engine} onStop={stop} />;
+    return mode === 'tuner' ? (
+      <Tuner engine={state.engine} onStop={stop} onSwitch={() => setMode('chords')} />
+    ) : (
+      <ChordCheck engine={state.engine} onStop={stop} onSwitch={() => setMode('tuner')} />
+    );
   }
 
   return (
     <main className="flex min-h-dvh flex-col bg-chassis px-6 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
         <h1 className="panel-label text-5xl font-semibold text-silk">Fretwork</h1>
-        <p className="panel-label text-sm text-dim">Tuner</p>
+        <p className="panel-label text-sm text-dim">Tuner · Chord Check</p>
       </div>
 
       <div className="flex flex-col items-center gap-4 pb-10">

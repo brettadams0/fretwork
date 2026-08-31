@@ -84,6 +84,12 @@ Fret Trainer · 3 Chord Check · 4 scheduler + onset + latency + Ghost Strum ·
 5 chroma, Change Race, Power Blitz · 6 Riff Runner + importer + songs ·
 7 progression · 8 polish.
 
+Phase 2 was skipped to get to Chord Check, so it is still owed: String Sniper,
+Fret Trainer, the rest of the §10.1 suite, the §10.2 phone-recorded fixtures,
+and the low-E integration-window decision. Chord Check leans on YIN harder than
+the tuner does — six judgements per chord instead of one — so that hardening
+matters more now, not less.
+
 ## Design (§9)
 Amplifier faceplate, not a dashboard. Tokens live in src/styles/theme.css as
 Tailwind theme tokens; a hex code in a component is a bug:
@@ -153,6 +159,30 @@ t=0.
 3. Whether the adaptive gate behaves on a real mic. The overlay shows `gate`,
    `noise floor` and `signal over room` side by side; `signal over room` should
    sit above 12 dB while a note rings.
+
+### Phase 3 calibration constants — none has met a real guitar
+
+All of these live at the top of `src/games/chordCheck.ts` and are used nowhere
+else, so recalibrating after a session with a real instrument is editing that
+block, never rewriting the logic. They are reasoned from §4.1 and from Phase 1's
+measurements, not measured.
+
+- `ATTACK_WINDOW_MS = 450` — how long the checker listens after a string starts
+  before judging it. Long enough for the 5-frame stability filter to settle
+  (53 ms) with room to spare; short enough not to feel like a wait.
+- `MATCH_CENTS = 50` — how far off pitch a string may be and still be the right
+  note. Half a semitone is the distance to the next note, so anything inside it
+  is a tuning problem, not a wrong finger. Saying "wrong fret" to someone whose
+  guitar has merely drifted is the confidently wrong answer §4.2 warns about.
+- `BUZZ_CONFIDENCE = 0.45` — the line between dead and buzz, and so between two
+  completely different pieces of advice. Below it there is no periodicity at all
+  and a finger is lying across the string; above it something is vibrating and
+  the problem is pressure or position. **The most likely of these to be wrong on
+  a real instrument**, because a real muted string is not silent — it thuds.
+- `FAST_DECAY_MS = 200`, `DECAY_RATIO = 0.25` — §4.1's buzz signature: a note
+  that falls to a quarter of its peak this fast was never properly fretted.
+- `REARM_MS = 250` — silence required before the next string counts. Stops a
+  decaying string being judged as the next pluck.
 
 ### Bench values, still unconfirmed on the device
 

@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 
-export const VERSION = '0.1.0';
-export const PHASE = 'phase 1';
+export const VERSION = '0.3.0';
+export const PHASE = 'chord check';
 
 /**
  * The version number, and the way into the §10.3 debug overlay: long-press it.

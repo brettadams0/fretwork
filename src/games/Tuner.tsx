@@ -14,7 +14,15 @@ import { STAGE0_LIMIT_MS, TunerRun, clock, type TunerView } from './tunerRun';
  * app rather than self-reported. The run logic lives in tunerRun.ts so it can
  * be asserted; this file is the face of it.
  */
-export function Tuner({ engine, onStop }: { engine: AudioEngine; onStop: () => void }) {
+export function Tuner({
+  engine,
+  onStop,
+  onSwitch,
+}: {
+  engine: AudioEngine;
+  onStop: () => void;
+  onSwitch: () => void;
+}) {
   const runRef = useRef(new TunerRun());
   const frameRef = useRef<AnalysisFrame | null>(null);
   const keyRef = useRef('');
@@ -180,18 +188,25 @@ export function Tuner({ engine, onStop }: { engine: AudioEngine; onStop: () => v
           </div>
         </div>
 
-        <div className="flex gap-3">
+        <div className="flex gap-2">
           <button
             type="button"
             onClick={reset}
-            className="panel-label min-h-touch flex-1 rounded-lg border border-edge bg-panel text-base text-lamp active:bg-edge"
+            className="panel-label min-h-touch flex-1 rounded-lg border border-edge bg-panel text-sm text-lamp active:bg-edge"
           >
-            {view.finishedMs !== null ? 'Run again' : 'Restart'}
+            {view.finishedMs !== null ? 'Again' : 'Restart'}
+          </button>
+          <button
+            type="button"
+            onClick={onSwitch}
+            className="panel-label min-h-touch flex-1 rounded-lg border border-edge bg-panel text-sm text-silk active:bg-edge"
+          >
+            Chords
           </button>
           <button
             type="button"
             onClick={onStop}
-            className="panel-label min-h-touch flex-1 rounded-lg border border-edge bg-panel text-base text-dim active:bg-edge"
+            className="panel-label min-h-touch flex-1 rounded-lg border border-edge bg-panel text-sm text-dim active:bg-edge"
           >
             Stop
           </button>

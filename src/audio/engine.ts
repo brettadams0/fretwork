@@ -18,9 +18,10 @@ import workletUrl from './worklet/capture.worklet.ts?worker&url';
 import {
   createHighPass,
   createNoiseFloor,
-  detectPitch,
   gateFor,
   rms,
+  validate,
+  yin,
   PitchTracker,
   type Pitch,
   type Settled,
@@ -82,6 +83,13 @@ export type AnalysisFrame = {
   pitch: Pitch | null;
   /** The most recent raw reading, held so the debug overlay is never blank. */
   lastPitch: Pitch | null;
+  /**
+   * What YIN said before the confidence floor and the band were applied, on
+   * frames where the gate was open. Chord Check reads this to tell a muted
+   * string (no periodicity at all) from a buzzed one (periodic, but too weak
+   * and unstable to pass) — a distinction the validated pitch throws away.
+   */
+  raw: Pitch | null;
   /** The 5-frame stability filter's verdict. */
   settled: Settled;
   /** Whether YIN ran on this frame. */
@@ -340,6 +348,7 @@ export class AudioEngine {
     const gate = gateFor(this.#noiseFloor);
 
     let pitch: Pitch | null = null;
+    let raw: Pitch | null = null;
     const analysed = primed && this.#hops % DETECT_EVERY_HOPS === 0;
     if (analysed) {
       if (level < gate) {
@@ -347,7 +356,8 @@ export class AudioEngine {
       } else {
         this.#detectsInWindow++;
         const t0 = performance.now();
-        pitch = detectPitch(this.#frame, this.ctx.sampleRate, gate);
+        raw = yin(this.#frame, this.ctx.sampleRate);
+        pitch = validate(raw);
         this.#detectMs = performance.now() - t0;
         if (pitch) this.#lastPitch = pitch;
       }
@@ -361,6 +371,7 @@ export class AudioEngine {
       gate,
       pitch,
       lastPitch: this.#lastPitch,
+      raw,
       settled: this.#settledState,
       analysed,
       detectMs: this.#detectMs,

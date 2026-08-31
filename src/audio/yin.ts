@@ -146,11 +146,23 @@ export function detectPitch(
   gate = RMS_GATE,
 ): Pitch | null {
   if (rms(frame) < gate) return null;
-  const got = yin(frame, sampleRate);
-  if (!got) return null;
-  if (got.confidence < MIN_CONFIDENCE) return null;
-  if (got.frequency < MIN_HZ || got.frequency > MAX_HZ) return null;
-  return got;
+  return validate(yin(frame, sampleRate));
+}
+
+/**
+ * The confidence floor and the frequency band, separated from the gate so a
+ * caller can hold on to what YIN actually said.
+ *
+ * Chord Check needs that: a muted string and a buzzed one both fail validation,
+ * and telling them apart is the difference between "your finger is lying flat
+ * on string 2" and "you are too far behind the fret". A rejected reading still
+ * carries the evidence — it is only thrown away here.
+ */
+export function validate(p: Pitch | null): Pitch | null {
+  if (!p) return null;
+  if (p.confidence < MIN_CONFIDENCE) return null;
+  if (p.frequency < MIN_HZ || p.frequency > MAX_HZ) return null;
+  return p;
 }
 
 /**
