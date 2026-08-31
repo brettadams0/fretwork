@@ -1,6 +1,6 @@
 import type { AnalysisFrame, MicReport } from '../audio/engine';
 import { DETECT_EVERY_HOPS, FRAME_SAMPLES, HOP_SAMPLES } from '../audio/engine';
-import { MIN_CONFIDENCE, RMS_GATE } from '../audio/yin';
+import { GATE_HEADROOM, MIN_CONFIDENCE } from '../audio/yin';
 import { noteName } from '../audio/notes';
 
 /**
@@ -58,9 +58,24 @@ export function DebugOverlay({
           <Row
             k="rms"
             v={frame ? frame.rms.toFixed(5) : '—'}
-            note={`gate ${RMS_GATE}${frame && frame.rms >= RMS_GATE ? ' · open' : ' · closed'}`}
+            note={frame && frame.rms >= frame.gate ? 'over the gate' : 'under the gate'}
           />
-          <Row k="noise floor" v={frame ? frame.noiseFloor.toFixed(5) : '—'} note="quietest of 5 s" />
+          <Row
+            k="gate"
+            v={frame ? frame.gate.toFixed(5) : '—'}
+            note={`${GATE_HEADROOM}x the room`}
+            bad={frame ? frame.rms < frame.gate : false}
+          />
+          <Row k="noise floor" v={frame ? frame.noiseFloor.toFixed(5) : '—'} note="quietest of 8 s" />
+          <Row
+            k="signal over room"
+            v={
+              frame && frame.rms > 0 && frame.noiseFloor > 0
+                ? `${(20 * Math.log10(frame.rms / frame.noiseFloor)).toFixed(1)} dB`
+                : '—'
+            }
+            note={`need ${(20 * Math.log10(GATE_HEADROOM)).toFixed(0)}`}
+          />
           <Row
             k="dBFS"
             v={frame && frame.rms > 0 ? `${(20 * Math.log10(frame.rms)).toFixed(1)}` : '—'}

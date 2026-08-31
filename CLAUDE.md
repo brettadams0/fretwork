@@ -114,26 +114,45 @@ Record any value discovered by testing on the real device here, with the reason.
 - Idle room level: RMS 0.00005, -85 dBFS — far under the 0.008 gate, so the
   gate correctly stays closed on silence.
 
-### Open — needs a reading taken while a string is ringing
+### The gate is relative to the room, not a constant
 
-1. **Does a played string clear `RMS_GATE = 0.008` on this mic?** Untested. If
-   it does not, the gate is the first genuinely device-tuned constant and the
-   tuner cannot work until it changes. Nothing else on this list matters until
-   this one is answered.
-2. **YIN's real cost on the device, and therefore `DETECT_EVERY_HOPS`.** Still
-   unknown — see the defect below.
-3. **Does the low E read E2 and not E3** through a real phone mic, with its
+§3.2's flat `rms < 0.008` only suits one room and one guitar. An unplugged
+electric into a phone mic lands near -50 dBFS and gets thrown away; a room with
+an amp humming in it holds the gate open on nothing. What matters is whether the
+string is louder than the room.
+
+- `GATE_HEADROOM = 4` — the string must be 12 dB over the measured room. Enough
+  that the room cannot trip it, low enough that a quiet guitar still clears it.
+- `GATE_MIN = 0.0008` (-62 dBFS) — the floor. Below this we would be chasing the
+  converter's own dither. Also what an unmeasured room resolves to: the first
+  second assumes quiet rather than loud, because assuming loud makes the app
+  look broken to exactly the user this is for.
+- `GATE_MAX = 0.02` (-34 dBFS) — past here no gate saves us, and the tuner says
+  so on screen (§12.6).
+- `RMS_GATE = 0.008` stays as §3.2's constant and as the reference the tests
+  measure the adaptive gate against.
+- Noise floor: the minimum level in each one-second bucket, second smallest of
+  the last eight. A mean measures the ringing note; a single minimum lets one
+  dropped frame define the room. Known limit, asserted rather than hidden:
+  eight seconds of unbroken sound with no gap does raise the floor.
+
+Verified end to end in Chromium against a fake device playing plucks at
+-48 dBFS in an -82 dBFS room — 6 dB *under* the old fixed gate, so nothing at
+all would have been detected before. All six strings tuned, first detection at
+t=0.
+
+### Still open — needs a reading taken while a string is ringing
+
+1. **Does the low E read E2 and not E3** through a real phone mic, with its
    rolloff below 100 Hz? The synthesised and fake-device fixtures both say yes;
    neither has a phone mic in the path.
-
-### Known defect, deferred (Phase 1)
-
-- The overlay's **detections/s counts analysis ticks, not YIN runs.**
-  `engine.ts` increments `#detectsInWindow` before the RMS gate is tested, so
-  with the gate closed it reports a full 93.6/s while `yin cost` correctly reads
-  0.00 ms. The row therefore proves nothing about CPU headroom when the room is
-  quiet — it only means something while the gate is open. Fix: increment only on
-  frames where YIN actually ran. One line; deferred deliberately, not forgotten.
+2. **YIN's real cost on the device, and therefore `DETECT_EVERY_HOPS`.** The
+   overlay's detections/s now counts only frames YIN actually ran on, so the row
+   means what it says — but it reads 0 while the gate is closed, so it still
+   needs a reading taken with a string ringing.
+3. Whether the adaptive gate behaves on a real mic. The overlay shows `gate`,
+   `noise floor` and `signal over room` side by side; `signal over room` should
+   sit above 12 dB while a note rings.
 
 ### Bench values, still unconfirmed on the device
 

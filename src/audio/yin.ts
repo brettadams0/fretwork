@@ -15,8 +15,40 @@
 
 import { centsOff } from './notes';
 
-/** Below this, the frame is room noise and the detector must not guess. */
+/**
+ * The gate: below it, the frame is room noise and the detector must not guess.
+ *
+ * §3.2 specifies a flat 0.008, and a flat number only suits one room and one
+ * guitar. An unplugged electric into a phone mic lands near -50 dBFS and is
+ * thrown away; a room with an amp humming in it sits above 0.008 and holds the
+ * gate open on nothing. What actually matters is whether the string is louder
+ * than the room, so the gate is defined relative to the measured noise floor
+ * and 0.008 becomes the fallback for when the room has not been measured yet.
+ */
 export const RMS_GATE = 0.008;
+/** The string has to be this far above the room — x4 is 12 dB. */
+export const GATE_HEADROOM = 4;
+/** -62 dBFS. Below this we would be chasing the converter's own dither. */
+export const GATE_MIN = 0.0008;
+/** -34 dBFS. Past here the room is so loud that no gate saves us (§12.6). */
+export const GATE_MAX = 0.02;
+
+/**
+ * The gate for a given measured noise floor.
+ *
+ * A floor of zero means the room has not been measured yet — the first second
+ * after the mic opens. That second resolves to GATE_MIN rather than to the
+ * spec's flat 0.008, i.e. it assumes a quiet room until told otherwise, because
+ * the two ways of being wrong are not equally bad. Assume-quiet and be wrong:
+ * YIN runs on room noise for under a second, and the 0.85 confidence floor and
+ * the 4-of-5 stability filter throw it away. Assume-loud and be wrong: someone
+ * with a quiet guitar picks a string, nothing happens, and the app looks broken
+ * in its first two seconds.
+ */
+export function gateFor(noiseFloor: number): number {
+  if (!(noiseFloor > 0)) return GATE_MIN;
+  return Math.min(GATE_MAX, Math.max(GATE_MIN, noiseFloor * GATE_HEADROOM));
+}
 /** Open low E a semitone flat, up to fret 24 on the high E. */
 export const MIN_HZ = 70;
 export const MAX_HZ = 1400;
@@ -108,8 +140,12 @@ export function yin(buf: Float32Array, sampleRate: number, threshold = YIN_THRES
  * is expected to have been high-passed already — the filter runs once over the
  * continuous stream rather than per frame, so it carries no restart transient.
  */
-export function detectPitch(frame: Float32Array, sampleRate: number): Pitch | null {
-  if (rms(frame) < RMS_GATE) return null;
+export function detectPitch(
+  frame: Float32Array,
+  sampleRate: number,
+  gate = RMS_GATE,
+): Pitch | null {
+  if (rms(frame) < gate) return null;
   const got = yin(frame, sampleRate);
   if (!got) return null;
   if (got.confidence < MIN_CONFIDENCE) return null;
@@ -153,6 +189,46 @@ export function createHighPass(sampleRate: number, cutoff = HIGHPASS_HZ) {
       block[i] = y0;
     }
     return block;
+  };
+}
+
+/**
+ * The room, estimated from the signal itself.
+ *
+ * The gate depends on this, so getting it wrong is worse than not having it: an
+ * estimator that learns the room while a string is ringing raises the gate to
+ * meet the note and then shuts on it. So the room is "the quietest it has been
+ * recently" — the minimum level in each one-second bucket, and the second
+ * smallest of the last eight buckets. Second smallest rather than smallest so a
+ * single dropped frame cannot define the room; a minimum rather than an average
+ * because an average of a ringing note measures the note.
+ *
+ * Returns 0 until the first bucket closes, which `gateFor` reads as "not
+ * measured yet" and answers with the spec's flat gate.
+ *
+ * The honest limit: eight seconds of continuously loud input with no gap at all
+ * does raise the floor, because nothing in the signal distinguishes a room that
+ * loud from playing that constant. Tuning has gaps in it; tests/noiseFloor
+ * asserts both the normal case and this one.
+ */
+export function createNoiseFloor(hopsPerBucket: number, buckets = 8) {
+  let bucketMin = Infinity;
+  let hops = 0;
+  let history: number[] = [];
+  let floor = 0;
+
+  return function update(level: number): number {
+    if (level < bucketMin) bucketMin = level;
+    if (++hops >= hopsPerBucket) {
+      history.push(bucketMin);
+      if (history.length > buckets) history.shift();
+      bucketMin = Infinity;
+      hops = 0;
+
+      const sorted = [...history].sort((a, b) => a - b);
+      floor = sorted[1] ?? sorted[0] ?? 0;
+    }
+    return floor;
   };
 }
 
