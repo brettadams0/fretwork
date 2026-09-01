@@ -17,10 +17,12 @@
 import workletUrl from './worklet/capture.worklet.ts?worker&url';
 import {
   createHighPass,
-  detectPitch,
+  createNoiseFloor,
+  gateFor,
   rms,
+  validate,
+  yin,
   PitchTracker,
-  RMS_GATE,
   type Pitch,
   type Settled,
 } from './yin';
@@ -75,10 +77,19 @@ export type AnalysisFrame = {
   rms: number;
   /** A rolling estimate of the room, for the §12.4 honesty about noise. */
   noiseFloor: number;
+  /** The gate this frame was judged against — the room plus headroom. */
+  gate: number;
   /** This frame's validated pitch, or null. Only set on detection frames. */
   pitch: Pitch | null;
   /** The most recent raw reading, held so the debug overlay is never blank. */
   lastPitch: Pitch | null;
+  /**
+   * What YIN said before the confidence floor and the band were applied, on
+   * frames where the gate was open. Chord Check reads this to tell a muted
+   * string (no periodicity at all) from a buzzed one (periodic, but too weak
+   * and unstable to pass) — a distinction the validated pitch throws away.
+   */
+  raw: Pitch | null;
   /** The 5-frame stability filter's verdict. */
   settled: Settled;
   /** Whether YIN ran on this frame. */
@@ -87,7 +98,11 @@ export type AnalysisFrame = {
   detectMs: number;
   /** Hops delivered per second, measured. Should sit near 93.75. */
   hopRate: number;
-  /** Detections per second, measured. Should sit near 93.75 / DETECT_EVERY_HOPS. */
+  /**
+   * Frames per second YIN actually ran on. Zero while the gate is closed, which
+   * is the point: a rate counted before the gate reports full throughput while
+   * doing no work at all, and then proves nothing about CPU headroom.
+   */
   detectRate: number;
 };
 
@@ -162,13 +177,9 @@ export class AudioEngine {
   #hopRate = 0;
   #detectRate = 0;
 
-  // Noise floor. Taking a percentile of recent levels measures the note, not
-  // the room, because while a string rings every frame is loud. Instead: the
-  // quietest moment in each of the last five seconds, and the median of those.
-  // Tuning has gaps in it, and the gaps are where the room is audible.
-  #buckets: number[] = [];
-  #bucketMin = Infinity;
-  #bucketHops = 0;
+  // The room. See createNoiseFloor — the gate is derived from this, so an
+  // estimator that measured the note instead would shut the gate on the note.
+  #noiseFloorOf: (level: number) => number;
   #noiseFloor = 0;
 
   #stopped = false;
@@ -188,6 +199,7 @@ export class AudioEngine {
     this.#node = node;
     this.#sink = sink;
     this.#highPass = createHighPass(ctx.sampleRate);
+    this.#noiseFloorOf = createNoiseFloor(Math.round(ctx.sampleRate / HOP_SAMPLES));
     this.#rateWindowStart = performance.now();
     node.port.onmessage = (e: MessageEvent<Float32Array>) => this.#onHop(e.data);
   }
@@ -329,29 +341,23 @@ export class AudioEngine {
     this.#frame.set(this.#ring);
     const level = primed ? rms(this.#frame) : 0;
 
-    if (primed) {
-      this.#bucketMin = Math.min(this.#bucketMin, level);
-      // One bucket per second of audio.
-      if (++this.#bucketHops >= this.ctx.sampleRate / HOP_SAMPLES) {
-        this.#buckets.push(this.#bucketMin);
-        if (this.#buckets.length > 5) this.#buckets.shift();
-        this.#bucketMin = Infinity;
-        this.#bucketHops = 0;
+    if (primed) this.#noiseFloor = this.#noiseFloorOf(level);
 
-        const sorted = [...this.#buckets].sort((a, b) => a - b);
-        this.#noiseFloor = sorted[Math.floor(sorted.length / 2)] ?? 0;
-      }
-    }
+    // The room decides the gate, not a constant: a string has to be louder than
+    // the room it is being played in, whichever room that is.
+    const gate = gateFor(this.#noiseFloor);
 
     let pitch: Pitch | null = null;
+    let raw: Pitch | null = null;
     const analysed = primed && this.#hops % DETECT_EVERY_HOPS === 0;
     if (analysed) {
-      this.#detectsInWindow++;
-      if (level < RMS_GATE) {
+      if (level < gate) {
         this.#detectMs = 0;
       } else {
+        this.#detectsInWindow++;
         const t0 = performance.now();
-        pitch = detectPitch(this.#frame, this.ctx.sampleRate);
+        raw = yin(this.#frame, this.ctx.sampleRate);
+        pitch = validate(raw);
         this.#detectMs = performance.now() - t0;
         if (pitch) this.#lastPitch = pitch;
       }
@@ -362,8 +368,10 @@ export class AudioEngine {
       time: this.ctx.currentTime,
       rms: level,
       noiseFloor: this.#noiseFloor,
+      gate,
       pitch,
       lastPitch: this.#lastPitch,
+      raw,
       settled: this.#settledState,
       analysed,
       detectMs: this.#detectMs,

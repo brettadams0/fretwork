@@ -1,4 +1,4 @@
-import { RMS_GATE } from '../audio/yin';
+
 
 /**
  * Input level, shown prominently (§12.4). A tuner that goes quiet is useless
@@ -13,12 +13,20 @@ function percent(rms: number): number {
   return Math.max(0, Math.min(100, ((db + 60) / 60) * 100));
 }
 
-const GATE_PERCENT = percent(RMS_GATE);
-
-export function LevelMeter({ rms, noiseFloor }: { rms: number; noiseFloor: number }) {
+export function LevelMeter({
+  rms,
+  noiseFloor,
+  gate,
+}: {
+  rms: number;
+  noiseFloor: number;
+  gate: number;
+}) {
   const level = percent(rms);
   const floor = percent(noiseFloor);
-  const open = rms >= RMS_GATE;
+  // The gate moves with the room, so the mark on the meter moves with it.
+  const gateAt = percent(gate);
+  const open = rms >= gate;
 
   return (
     <div>
@@ -45,7 +53,7 @@ export function LevelMeter({ rms, noiseFloor }: { rms: number; noiseFloor: numbe
         {/* The gate. Below this line the detector refuses to guess. */}
         <div
           className="absolute inset-y-0 w-px bg-silk"
-          style={{ left: `${GATE_PERCENT}%` }}
+          style={{ left: `${gateAt}%` }}
           aria-hidden
         />
       </div>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AnalysisFrame, AudioEngine } from '../audio/engine';
 import { STANDARD_TUNING, noteName } from '../audio/notes';
-import { RMS_GATE } from '../audio/yin';
+import { GATE_MAX, gateFor } from '../audio/yin';
 import { Banner, DebugOverlay, LevelMeter, Needle, StringDots, VersionTag, useWakeLock } from '../ui';
 import { readBestTuneMs, recordTuneMs } from '../store';
 import { STAGE0_LIMIT_MS, TunerRun, clock, type TunerView } from './tunerRun';
@@ -14,13 +14,21 @@ import { STAGE0_LIMIT_MS, TunerRun, clock, type TunerView } from './tunerRun';
  * app rather than self-reported. The run logic lives in tunerRun.ts so it can
  * be asserted; this file is the face of it.
  */
-export function Tuner({ engine, onStop }: { engine: AudioEngine; onStop: () => void }) {
+export function Tuner({
+  engine,
+  onStop,
+  onSwitch,
+}: {
+  engine: AudioEngine;
+  onStop: () => void;
+  onSwitch: () => void;
+}) {
   const runRef = useRef(new TunerRun());
   const frameRef = useRef<AnalysisFrame | null>(null);
   const keyRef = useRef('');
 
   const [view, setView] = useState<TunerView>(() => runRef.current.view());
-  const [level, setLevel] = useState({ rms: 0, noiseFloor: 0 });
+  const [level, setLevel] = useState({ rms: 0, noiseFloor: 0, gate: gateFor(0) });
   const [debugFrame, setDebugFrame] = useState<AnalysisFrame | null>(null);
   const [showDebug, setShowDebug] = useState(false);
   const [best, setBest] = useState<number | null>(() => readBestTuneMs());
@@ -59,12 +67,13 @@ export function Tuner({ engine, onStop }: { engine: AudioEngine; onStop: () => v
           next.finishedMs === null ? 'x' : 'done',
           Math.round(f.rms * 500),
           Math.round(f.noiseFloor * 500),
+          Math.round(f.gate * 500),
         ].join('|');
 
         if (key !== keyRef.current) {
           keyRef.current = key;
           setView(next);
-          setLevel({ rms: f.rms, noiseFloor: f.noiseFloor });
+          setLevel({ rms: f.rms, noiseFloor: f.noiseFloor, gate: f.gate });
         }
       }
       raf = requestAnimationFrame(tick);
@@ -102,9 +111,10 @@ export function Tuner({ engine, onStop }: { engine: AudioEngine; onStop: () => v
   const note = view.frequency !== null ? nameOf(view.frequency) : active ? active.label : '—';
   const overTime = view.finishedMs === null && view.elapsedMs > STAGE0_LIMIT_MS;
 
-  // Above the gate but nothing stable coming out of the detector, for a while:
-  // that is a room too loud for this to work, and §12.4 says to say so.
-  const noisyRoom = level.noiseFloor >= RMS_GATE;
+  // The gate tracks the room, so a loud room is not "the room is above the
+  // gate" any more — it is a room loud enough that the gate had to clamp, and
+  // the string can no longer be asked to get above it. §12.4 says to say so.
+  const noisyRoom = level.gate >= GATE_MAX;
 
   return (
     <main className="flex min-h-dvh flex-col bg-chassis px-5 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
@@ -122,8 +132,8 @@ export function Tuner({ engine, onStop }: { engine: AudioEngine; onStop: () => v
         )}
         {noisyRoom && (
           <Banner tone="warn">
-            The room is louder than the detector&rsquo;s gate. It will keep working, but a clip-on
-            tuner will beat it here.
+            This room is loud enough that the string has to fight it. It will keep working, but a
+            clip-on tuner will beat it here &mdash; it reads vibration, not air.
           </Banner>
         )}
       </div>
@@ -139,13 +149,13 @@ export function Tuner({ engine, onStop }: { engine: AudioEngine; onStop: () => v
         />
 
         <p className="mt-6 min-h-[2.5rem] text-center text-sm leading-snug text-dim">
-          {instruction(view, level.rms)}
+          {instruction(view, level.rms, level.gate)}
         </p>
       </div>
 
       {/* Bottom third: the numbers that matter, then the controls. */}
       <div className="space-y-4 pb-6">
-        <LevelMeter rms={level.rms} noiseFloor={level.noiseFloor} />
+        <LevelMeter rms={level.rms} noiseFloor={level.noiseFloor} gate={level.gate} />
 
         <div className="flex items-center justify-between rounded border border-edge bg-panel px-3 py-2">
           <div>
@@ -178,18 +188,25 @@ export function Tuner({ engine, onStop }: { engine: AudioEngine; onStop: () => v
           </div>
         </div>
 
-        <div className="flex gap-3">
+        <div className="flex gap-2">
           <button
             type="button"
             onClick={reset}
-            className="panel-label min-h-touch flex-1 rounded-lg border border-edge bg-panel text-base text-lamp active:bg-edge"
+            className="panel-label min-h-touch flex-1 rounded-lg border border-edge bg-panel text-sm text-lamp active:bg-edge"
           >
-            {view.finishedMs !== null ? 'Run again' : 'Restart'}
+            {view.finishedMs !== null ? 'Again' : 'Restart'}
+          </button>
+          <button
+            type="button"
+            onClick={onSwitch}
+            className="panel-label min-h-touch flex-1 rounded-lg border border-edge bg-panel text-sm text-silk active:bg-edge"
+          >
+            Chords
           </button>
           <button
             type="button"
             onClick={onStop}
-            className="panel-label min-h-touch flex-1 rounded-lg border border-edge bg-panel text-base text-dim active:bg-edge"
+            className="panel-label min-h-touch flex-1 rounded-lg border border-edge bg-panel text-sm text-dim active:bg-edge"
           >
             Stop
           </button>
@@ -227,13 +244,13 @@ function listOf(items: string[]): string {
   return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
 }
 
-function instruction(view: TunerView, rms: number): string {
+function instruction(view: TunerView, rms: number, gate: number): string {
   if (view.finishedMs !== null) {
     return view.passed
       ? 'All six inside ±5 cents. Stage 0 tuning check passed.'
       : 'All six are in tune. The clock went past two minutes — run it again when you want the check.';
   }
-  if (rms < RMS_GATE) return 'Pick any string. The tuner works out which one it is.';
+  if (rms < gate) return 'Pick any string. The tuner works out which one it is.';
   if (!view.settled) return 'Heard something, but nothing steady enough to trust yet. Let it ring.';
   if (view.cents === null) return 'Let it ring.';
   const a = Math.abs(view.cents);
